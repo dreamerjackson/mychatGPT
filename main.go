@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"io/ioutil"
 	"mychatGPT/proxy"
 	"net/http"
@@ -39,30 +40,41 @@ type ChatGPTResponse struct {
 	} `json:"choices"`
 }
 
+var apiKey = "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"
+
+var messages = []Message{}
+
 func main() {
-	apiKey := "xxx"
-	userMessage := "What are the benefits of using Go language?"
+	r := gin.Default()
+	r.LoadHTMLFiles("index.html")
 
-	messages := []Message{
-		{
-			Role:    "system",
-			Content: "You are a helpful assistant that provides information about the Go programming language.",
-		},
-		{
-			Role:    "user",
-			Content: userMessage,
-		},
+	r.GET("/", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "index.html", nil)
+	})
+	r.GET("/ask", AskChatGPT)
+
+	if err := r.Run(":8080"); err != nil {
+		panic(err)
 	}
 
-	chatGPTRequest := ChatGPTRequest{
-		Messages: messages,
-		Model:    "gpt-3.5-turbo",
-	}
-
-	queryChatGPT(apiKey, chatGPTRequest)
 }
 
-func queryChatGPT(apiKey string, chatGPTRequest ChatGPTRequest) {
+func AskChatGPT(c *gin.Context) {
+	question := c.Query("question")
+	if question == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing question parameter"})
+		return
+	}
+
+	messages = append(messages, Message{
+		Role:    "user",
+		Content: question,
+	})
+	queryChatGPT(c)
+}
+
+func queryChatGPT(c *gin.Context) {
+
 	url := "https://api.openai.com/v1/chat/completions"
 
 	client := &http.Client{}
@@ -75,6 +87,11 @@ func queryChatGPT(apiKey string, chatGPTRequest ChatGPTRequest) {
 	transport := http.DefaultTransport.(*http.Transport)
 	transport.Proxy = p
 	client.Transport = transport
+
+	chatGPTRequest := ChatGPTRequest{
+		Messages: messages,
+		Model:    "gpt-3.5-turbo",
+	}
 
 	requestBody, err := json.Marshal(chatGPTRequest)
 	if err != nil {
@@ -104,14 +121,14 @@ func queryChatGPT(apiKey string, chatGPTRequest ChatGPTRequest) {
 		return
 	}
 
-	fmt.Println(string(body))
-
 	var chatGPTResponse ChatGPTResponse
 	err = json.Unmarshal(body, &chatGPTResponse)
 	if err != nil {
 		fmt.Println("Error unmarshalling response:", err)
 		return
 	}
+	messages = append(messages, chatGPTResponse.Choices[0].Message)
 
 	fmt.Println("Generated response:", chatGPTResponse.Choices[0].Message.Content)
+	c.JSON(200, gin.H{"response": chatGPTResponse.Choices[0].Message.Content})
 }
